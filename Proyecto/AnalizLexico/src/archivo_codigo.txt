@@ -1,17 +1,5 @@
-Buenas, que hace profe
-Porfa, ponganos un 10
-//Ya no se que más poner
-for(i=0;i<10;i++)
-int i;
-a = 5+10
-b = 1<2
-c = 
-/*
-Estos son comentarios de varias
-lineas
-*/
-if(si == 1){
-
-    String gretting = Hello;
-
+public class App {
+    public static void main(String[] args) throws Exception {
+        System.out.println("Hello, World!");
+    }
 }

@@ -19,16 +19,48 @@ public class Main {
 
         // 1. DEFINIMOS LAS REGLAS DEL AUTÓMATA
         Map<String, String> reglasTokens = new LinkedHashMap<>();
-        reglasTokens.put("BLOCKCOMMENT", "/\\*[\\s\\S]*?\\*/"); // Sin guion bajo
-        reglasTokens.put("LINECOMMENT", "//.*");               // Sin guion bajo
+        //reglasTokens.put("BLOCKCOMMENT", "/\\*[\\s\\S]*?\\*/"); // Sin guion bajo
+        //reglasTokens.put("LINECOMMENT", "//.*");               // Sin guion bajo
+        
         reglasTokens.put("BOOLLITERAL", "\\b(true|false)\\b"); // Sin guion bajo
-        reglasTokens.put("KEYWORD", "\\b(if|else|while|for|return|int|float|void|bool|byte|short|long|double|char|String|define)\\b");
-        reglasTokens.put("ID", "[a-zA-Z_][a-zA-Z0-9_]*");
+        reglasTokens.put("IF", "if");
+        reglasTokens.put("ELSE", "else");
+        reglasTokens.put("WHILE", "while");
+        reglasTokens.put("FOR", "for");
+        reglasTokens.put("RETURN", "return");
+        reglasTokens.put("INT", "int");
+        reglasTokens.put("FLOAT", "float");
+        reglasTokens.put("VOID", "void");
+        reglasTokens.put("BOOL", "bool");
+        reglasTokens.put("BYTE", "byte");
+        reglasTokens.put("SHORT", "short");
+        reglasTokens.put("LONG", "long");
+        reglasTokens.put("DOUBLE", "double");
+        reglasTokens.put("CHAR", "char");
+        reglasTokens.put("STRING", "String");
         reglasTokens.put("FLOATLITERAL", "\\d+\\.\\d+");       // Sin guion bajo
         reglasTokens.put("INTLITERAL", "\\d+");                // Sin guion bajo
         reglasTokens.put("STRINGLITERAL", "\".*?\"");          // Sin guion bajo
         reglasTokens.put("OPERATOR", "[+\\-*/=<>!]+");
-        reglasTokens.put("DELIMITER", "[(){}\\[\\];,]");
+        reglasTokens.put("LPAREN", "\\(");
+        reglasTokens.put("RPAREN", "\\)");
+        reglasTokens.put("IBRACES", "\\{");
+        reglasTokens.put("DBRACES", "\\}");
+        reglasTokens.put("ISQUARE", "\\[");
+        reglasTokens.put("DSQUARE", "\\]");
+        reglasTokens.put("COMA", "\\,");
+        reglasTokens.put("DOT", "\\.");
+        reglasTokens.put("SEMICOLON", "\\;");
+        reglasTokens.put("PUBLIC", "public");
+        reglasTokens.put("PRIVATE", "private");
+        reglasTokens.put("STATIC", "static");
+        reglasTokens.put("CLASS", "class");
+        reglasTokens.put("THROWS", "throws");
+        reglasTokens.put("EXCEPTION", "Exception");
+        reglasTokens.put("TRY", "try");
+        reglasTokens.put("CATCH", "catch");
+
+        reglasTokens.put("ID", "[a-zA-Z_][a-zA-Z0-9_]*");
         reglasTokens.put("WHITESPACE", "\\s+");
         reglasTokens.put("UNKNOWN", ".");
 
