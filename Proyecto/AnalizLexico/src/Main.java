@@ -18,12 +18,11 @@ public class Main {
         }
 
         // 1. DEFINIMOS LAS REGLAS DEL AUTÓMATA
-        // Usamos LinkedHashMap para mantener el orden exacto de las reglas (igual que la lista en Python)
         Map<String, String> reglasTokens = new LinkedHashMap<>();
         reglasTokens.put("BLOCKCOMMENT", "/\\*[\\s\\S]*?\\*/"); // Sin guion bajo
         reglasTokens.put("LINECOMMENT", "//.*");               // Sin guion bajo
         reglasTokens.put("BOOLLITERAL", "\\b(true|false)\\b"); // Sin guion bajo
-        reglasTokens.put("KEYWORD", "\\b(if|else|while|for|return|int|float|void|bool)\\b");
+        reglasTokens.put("KEYWORD", "\\b(if|else|while|for|return|int|float|void|bool|byte|short|long|double|char|String|define)\\b");
         reglasTokens.put("ID", "[a-zA-Z_][a-zA-Z0-9_]*");
         reglasTokens.put("FLOATLITERAL", "\\d+\\.\\d+");       // Sin guion bajo
         reglasTokens.put("INTLITERAL", "\\d+");                // Sin guion bajo
@@ -52,7 +51,6 @@ public class Main {
         int numeroLinea = 1;
 
         // 2. EL BUCLE DE ESCANEO
-        // find() funciona igual que finditer() en Python
         while (coincidencia.find()) {
             String tipoToken = null;
             String lexema = coincidencia.group();
@@ -86,6 +84,7 @@ public class Main {
         }
 
         System.out.println("\n--- Análisis Léxico Terminado ---");
+
     }
 
     // 3. PUNTO DE ENTRADA DEL PROGRAMA
