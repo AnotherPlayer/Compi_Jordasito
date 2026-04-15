@@ -10,6 +10,7 @@ section .data
     txt_div db 10, "Division (Cociente): ", 0
     txt_mod db 10, "Modulo (Residuo): ", 0
     newline db 10, 0 ; El carácter de salto de línea
+    sign_minus db "-" ; Agregado para imprimir el signo negativo
 
 section .bss
     buffer resb 32    
@@ -47,8 +48,29 @@ _start:
     mov rsi, txt_res
     mov rdx, 8
     call print_string
+    
     mov rax, [n1]
-    sub rax, [n2]
+    mov rbx, [n2]
+    cmp rax, rbx        ; Comparamos n1 con n2
+    jge .resta_positiva ; Si n1 >= n2, saltamos a la resta normal
+    
+    ; Si n1 < n2 (Resultado negativo)
+    push rax            ; Guardamos rax para no perderlo
+    mov rax, 1          ; Preparar syscall write
+    mov rdi, 1          ; stdout
+    mov rsi, sign_minus ; Usamos la variable para el signo '-'
+    mov rdx, 1          ; Longitud 1
+    syscall
+    pop rax             ; Recuperamos n1
+    
+    sub rbx, rax        ; Hacemos la resta inversa (n2 - n1) para obtener el valor absoluto
+    mov rax, rbx
+    jmp .imprimir_resta
+
+.resta_positiva:
+    sub rax, rbx        ; n1 - n2 normal
+
+.imprimir_resta:
     call print_number
 
     ; --- MULTIPLICACIÓN ---

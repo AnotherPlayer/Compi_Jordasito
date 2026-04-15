@@ -6,6 +6,20 @@
     "configurations": [
         {
             "type": "java",
+            "name": "Main",
+            "request": "launch",
+            "mainClass": "Proyecto.AnalizSintactico.Main",
+            "projectName": "Compiladores_e6e4a570"
+        },
+        {
+            "type": "java",
+            "name": "Main",
+            "request": "launch",
+            "mainClass": "Proyecto.AnalizLexico.AnalizSintactico.Main",
+            "projectName": "Compiladores_e6e4a570"
+        },
+        {
+            "type": "java",
             "name": "Current File",
             "request": "launch",
             "mainClass": "${file}"
