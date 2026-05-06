@@ -1,212 +1,255 @@
-package Proyecto.AnalizSintactico;
-
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-// --- 1. Definición de Tokens ---
-enum TokenType {
-    NUMERO, IDENTIFICADOR, SUMA, RESTA, MULTIPLICACION, DIVISION, PARENTESIS_IZQ, PARENTESIS_DER,
-    ASIGNACION, PUNTO_COMA, MENOR_QUE, MAYOR_QUE, LLAVE_IZQ, LLAVE_DER, CADENA_TEXTO
-}
-
-class Token {
-    TokenType tipo;
-    String valor;
-
-    public Token(TokenType tipo, String valor) {
-        this.tipo = tipo;
-        this.valor = valor;
-    }
-}
-
-// --- 2. Analizador Léxico (Lexer) ---
-class AnalizadorLexico {
-    private String codigoFuente;
-    private int posicionActual = 0;
-
-    public AnalizadorLexico(String codigoFuente) {
-        this.codigoFuente = codigoFuente;
+public class Main {
+    enum TokenType {
+        DATATYPE, KEYWORD, IDENTIFIER, NUMBER, OPERATOR, STRING,
+        SEMICOLON, COLON, COMMA, LPAREN, RPAREN, LBRACE, RBRACE, ANNOTATION, EOF, UNKNOWN,
+        IF, ELSE, FOR, WHILE, SWITCH, WHEN, RETURN, ENUM, IMPORT, PACKAGE, CLASS
     }
 
-    public List<Token> escanearTokens() {
-        List<Token> tokens = new ArrayList<>();
+    static class Token {
+        TokenType type;
+        String value;
+        Token(TokenType type, String value) { this.type = type; this.value = value; }
+        @Override
+        public String toString() { return "[" + type + ": " + value + "]"; }
+    }
 
-        while (posicionActual < codigoFuente.length()) {
-            char c = codigoFuente.charAt(posicionActual);
+    private final List<Token> tokens;
+    private int current = 0;
 
-            // Ignorar espacios y saltos de línea
-            if (Character.isWhitespace(c)) {
-                posicionActual++;
-                continue;
-            }
+    private final Set<String> tablaSimbolos = new HashSet<>();
+    private final Set<String> libreriasImportadas = new HashSet<>();
 
-            // Detectar Números
-            if (Character.isDigit(c)) {
-                StringBuilder numero = new StringBuilder();
-                while (posicionActual < codigoFuente.length() && Character.isDigit(codigoFuente.charAt(posicionActual))) {
-                    numero.append(codigoFuente.charAt(posicionActual));
-                    posicionActual++;
-                }
-                tokens.add(new Token(TokenType.NUMERO, numero.toString()));
-                continue;
-            }
+    public Main(List<Token> tokens) { this.tokens = tokens; }
 
-            // Detectar Identificadores (Variables simples de 1 letra para probar)
-            if (Character.isLetter(c)) {
-                StringBuilder id = new StringBuilder();
-                while (posicionActual < codigoFuente.length() && Character.isLetterOrDigit(codigoFuente.charAt(posicionActual))) {
-                    id.append(codigoFuente.charAt(posicionActual));
-                    posicionActual++;
-                }
-                tokens.add(new Token(TokenType.IDENTIFICADOR, id.toString()));
-                continue;
-            }
+    public void analizar() {
+        if (tokens.isEmpty() || tokens.get(0).type == TokenType.EOF) {
+            System.out.println("El archivo está vacío o solo contiene comentarios.");
+            return;
+        }
+        try {
+            System.out.println("--- INICIANDO ANALISIS ---");
+            while (!isAtEnd()) statement();
+            System.out.println("\n>>> EXITO: El código es sintácticamente correcto.");
+            System.out.println("Variables en memoria: " + tablaSimbolos);
+        } catch (RuntimeException e) {
+            System.err.println("\n>>> ERROR SINTACTICO/SEMANTICO: " + e.getMessage());
+        }
+    }
 
-            // Detectar Cadenas de Texto (ej. "Hola we\n")
-            if (c == '"') {
-                StringBuilder cadena = new StringBuilder();
-                posicionActual++; // Saltamos la primera comilla
+    private void statement() {
+        if (isAtEnd()) return;
 
-                // Leemos todo hasta encontrar la otra comilla
-                while (posicionActual < codigoFuente.length() && codigoFuente.charAt(posicionActual) != '"') {
-                    cadena.append(codigoFuente.charAt(posicionActual));
-                    posicionActual++;
-                }
+        while (check(TokenType.ANNOTATION)) advance();
 
-                tokens.add(new Token(TokenType.CADENA_TEXTO, cadena.toString()));
-                posicionActual++; // Saltamos la comilla final
-                continue; // Volvemos al inicio del while principal
-            }
-
-            // Detectar Operadores y Símbolos
-            switch (c) {
-                case '+': tokens.add(new Token(TokenType.SUMA, "+")); break;
-                case '-': tokens.add(new Token(TokenType.RESTA, "-")); break;
-                case '*': tokens.add(new Token(TokenType.MULTIPLICACION, "*")); break;
-                case '/': tokens.add(new Token(TokenType.DIVISION, "/")); break;
-                case '(': tokens.add(new Token(TokenType.PARENTESIS_IZQ, "(")); break;
-                case ')': tokens.add(new Token(TokenType.PARENTESIS_DER, ")")); break;
-                case '=': tokens.add(new Token(TokenType.ASIGNACION, "=")); break;
-                case ';': tokens.add(new Token(TokenType.PUNTO_COMA, ";")); break;
-                case '<': tokens.add(new Token(TokenType.MENOR_QUE, "<")); break;
-                case '>': tokens.add(new Token(TokenType.MAYOR_QUE, ">")); break;
-                case '{': tokens.add(new Token(TokenType.LLAVE_IZQ, "{")); break;
-                case '}': tokens.add(new Token(TokenType.LLAVE_DER, "}")); break;
-                default:
-                    throw new RuntimeException("Error Léxico: Carácter no reconocido '" + c + "' en la posición " + posicionActual);
-            }
-            posicionActual++;
+        List<String> modificadores = new ArrayList<>();
+        while (checkKeyword("public") || checkKeyword("private") || checkKeyword("protected") || checkKeyword("static")) {
+            modificadores.add(advance().value);
         }
 
+        if (match(TokenType.CLASS)) {
+            handleClass(modificadores);
+        } else if (match(TokenType.DATATYPE)) {
+            String tipoDato = previous().value;
+            Token id = consume(TokenType.IDENTIFIER, "Falta el identificador despues de '" + tipoDato + "'");
+            if (check(TokenType.LPAREN)) declaracionMetodo(modificadores, tipoDato, id);
+            else declaracionVariable(modificadores, tipoDato, id);
+        } else if (!modificadores.isEmpty()) {
+            throw new RuntimeException("Modificador suelto sin clase o variable: " + peek().value);
+        } else if (check(TokenType.IDENTIFIER)) {
+            Token id = advance();
+            if (check(TokenType.LPAREN)) {
+                llamadaMetodoLocal(id);
+            } else {
+                operacionVariable(id);
+            }
+        } else if (match(TokenType.IF)) {
+            handleIf();
+        } else if (match(TokenType.FOR)) {
+            handleFor();
+        } else if (match(TokenType.WHILE)) {
+            handleWhile();
+        } else if (match(TokenType.ENUM)) {
+            handleEnum();
+        } else if (match(TokenType.IMPORT)) {
+            handleImport();
+        } else if (match(TokenType.PACKAGE)) {
+            handlePackage();
+        } else if (match(TokenType.RETURN)) {
+            ignorarHastaPuntoYComa();
+        } else if (match(TokenType.KEYWORD)) {
+            ignorarHastaPuntoYComa();
+        } else if (match(TokenType.LBRACE)) {
+            handleBody();
+        } else {
+            advance();
+        }
+    }
+
+    private void llamadaMetodoLocal(Token id) {
+        String nombreMetodo = id.value;
+        consume(TokenType.LPAREN, "Falta '(' al llamar a " + nombreMetodo);
+        skipToClosingParen();
+        consume(TokenType.SEMICOLON, "Falta ';' al final de la instruccion");
+        if (nombreMetodo.equals("System.out.println") || nombreMetodo.equals("System.out.print")) {
+            System.out.println("   -> [CONSOLA] Impresion detectada: " + nombreMetodo + "(...)");
+        } else {
+            System.out.println("   -> [LLAMADA METODO] Ejecutando: " + nombreMetodo + "(...)");
+        }
+    }
+
+    private void operacionVariable(Token id) {
+        String nombreVariable = id.value;
+        boolean usaThis = false;
+        if (nombreVariable.startsWith("this.")) {
+            nombreVariable = nombreVariable.substring(5);
+            usaThis = true;
+        }
+        if (!tablaSimbolos.contains(nombreVariable)) {
+            throw new RuntimeException("Coherencia: Uso de variable no declarada -> '" + nombreVariable + "'");
+        }
+        while (!check(TokenType.SEMICOLON) && !isAtEnd()) advance();
+        consume(TokenType.SEMICOLON, "Falta ';' después de usar la variable");
+        if (usaThis) System.out.println("   -> [USO THIS] Acceso a: this." + nombreVariable);
+        else System.out.println("   -> [USO VAR] Operación con: " + nombreVariable);
+    }
+
+    private void declaracionVariable(List<String> modificadores, String tipoDato, Token id) {
+        if (id.value.startsWith("this.")) throw new RuntimeException("No puedes declarar una variable usando 'this.' (" + id.value + ")");
+        if (tablaSimbolos.contains(id.value)) throw new RuntimeException("La variable '" + id.value + "' ya existe.");
+        tablaSimbolos.add(id.value);
+        if (check(TokenType.OPERATOR) && peek().value.equals("=")) {
+            advance();
+            while (!check(TokenType.SEMICOLON) && !isAtEnd()) advance();
+        }
+        consume(TokenType.SEMICOLON, "Falta ';'");
+        System.out.println("   -> [VARIABLE] " + tipoDato + " " + id.value);
+    }
+
+    private void handleClass(List<String> modificadores) {
+        Token id = consume(TokenType.IDENTIFIER, "Se esperaba el nombre de la clase");
+        if (tablaSimbolos.contains(id.value)) throw new RuntimeException("El nombre de la clase ya está en uso.");
+        tablaSimbolos.add(id.value);
+        System.out.println("   -> [CLASE] " + id.value);
+        consume(TokenType.LBRACE, "Falta '{'");
+        while (!check(TokenType.RBRACE) && !isAtEnd()) statement();
+        consume(TokenType.RBRACE, "Falta '}'");
+    }
+
+    private void declaracionMetodo(List<String> modificadores, String tipoDato, Token id) {
+        System.out.println("   -> [METODO] " + tipoDato + " " + id.value + "()");
+        consume(TokenType.LPAREN, "Falta '('"); skipToClosingParen();
+        consume(TokenType.LBRACE, "Falta '{'");
+        while (!check(TokenType.RBRACE) && !isAtEnd()) statement();
+        consume(TokenType.RBRACE, "Falta '}'");
+    }
+
+    private void handleEnum() {
+        Token id = consume(TokenType.IDENTIFIER, "Se esperaba nombre del enum");
+        tablaSimbolos.add(id.value);
+        consume(TokenType.LBRACE, "Falta '{'");
+        if (!check(TokenType.RBRACE)) {
+            do { if(check(TokenType.IDENTIFIER)) tablaSimbolos.add(advance().value); } while (match(TokenType.COMMA));
+        }
+        consume(TokenType.RBRACE, "Falta '}'");
+        if (check(TokenType.SEMICOLON)) advance();
+        System.out.println("   -> [ENUM] " + id.value);
+    }
+
+    private void handleImport() {
+        Token ruta = consume(TokenType.IDENTIFIER, "Falta ruta");
+        String n = ruta.value; if (check(TokenType.OPERATOR) && peek().value.equals("*")) n += advance().value;
+        consume(TokenType.SEMICOLON, "Falta ';'"); libreriasImportadas.add(n);
+    }
+    private void handlePackage() { consume(TokenType.IDENTIFIER, "Falta nombre"); consume(TokenType.SEMICOLON, "Falta ';'"); }
+    private void handleIf() { consume(TokenType.LPAREN, "Falta '('"); skipToClosingParen(); handleBody(); if (match(TokenType.ELSE)) { handleBody(); } }
+    private void handleFor() { consume(TokenType.LPAREN, "Falta '('"); skipToClosingParen(); handleBody(); }
+    private void handleWhile() { consume(TokenType.LPAREN, "Falta '('"); skipToClosingParen(); handleBody(); }
+
+    private void handleBody() {
+        if (match(TokenType.LBRACE)) {
+            while (!check(TokenType.RBRACE) && !isAtEnd()) statement();
+            consume(TokenType.RBRACE, "Falta '}'");
+        } else statement();
+    }
+    private void ignorarHastaPuntoYComa() { while (!check(TokenType.SEMICOLON) && !check(TokenType.LBRACE) && !isAtEnd()) advance(); if (check(TokenType.SEMICOLON)) advance(); }
+
+    private void skipToClosingParen() {
+        int count = 1;
+        while (count > 0 && !isAtEnd()) {
+            if (check(TokenType.LPAREN)) count++;
+            if (check(TokenType.RPAREN)) count--;
+            advance();
+        }
+    }
+
+    private boolean checkKeyword(String kw) { return check(TokenType.KEYWORD) && peek().value.equals(kw); }
+    private Token consume(TokenType type, String msg) { if (check(type)) return advance(); throw new RuntimeException(msg + " ('" + peek().value + "')"); }
+    private boolean match(TokenType... types) { for (TokenType t : types) if (check(t)) { advance(); return true; } return false; }
+    private boolean check(TokenType t) { return !isAtEnd() && peek().type == t; }
+    private Token advance() { if (!isAtEnd()) current++; return tokens.get(current - 1); }
+    private boolean isAtEnd() { return current >= tokens.size() || peek().type == TokenType.EOF; }
+    private Token peek() { return tokens.get(current); }
+    private Token previous() { return tokens.get(current - 1); }
+
+    public static List<Token> lexer(String filePath) throws IOException {
+        List<Token> tokens = new ArrayList<>();
+        String content = new String(Files.readAllBytes(Paths.get(filePath)));
+
+        content = content.replaceAll("/\\*[\\s\\S]*?\\*/", "");
+        content = content.replaceAll("//.*", "");
+
+        String regex = "\"[^\"]*\"|[a-zA-Z_][a-zA-Z0-9_.]*|[0-9]+(\\.[0-9]+)?|[=+\\-*/<>!&|]+|[;(),{}:]";
+        Matcher m = Pattern.compile(regex).matcher(content);
+
+        while (m.find()) {
+            String part = m.group();
+
+            if (part.startsWith("\"")) tokens.add(new Token(TokenType.STRING, part));
+            else if (part.equals(";")) tokens.add(new Token(TokenType.SEMICOLON, ";"));
+            else if (part.equals(",")) tokens.add(new Token(TokenType.COMMA, ","));
+            else if (part.equals("(")) tokens.add(new Token(TokenType.LPAREN, "("));
+            else if (part.equals(")")) tokens.add(new Token(TokenType.RPAREN, ")"));
+            else if (part.equals("{")) tokens.add(new Token(TokenType.LBRACE, "{"));
+            else if (part.equals("}")) tokens.add(new Token(TokenType.RBRACE, "}"));
+            else if (part.matches("@[a-zA-Z_][a-zA-Z0-9_]*")) tokens.add(new Token(TokenType.ANNOTATION, part));
+            else if (part.matches("int|String|float|double|boolean|char|byte|short|long|void"))
+                tokens.add(new Token(TokenType.DATATYPE, part));
+            else if (part.equals("if")) tokens.add(new Token(TokenType.IF, part));
+            else if (part.equals("else")) tokens.add(new Token(TokenType.ELSE, part));
+            else if (part.equals("for")) tokens.add(new Token(TokenType.FOR, part));
+            else if (part.equals("while")) tokens.add(new Token(TokenType.WHILE, part));
+            else if (part.equals("when")) tokens.add(new Token(TokenType.WHEN, part));
+            else if (part.equals("switch")) tokens.add(new Token(TokenType.SWITCH, part));
+            else if (part.equals("return")) tokens.add(new Token(TokenType.RETURN, part));
+            else if (part.equals("class")) tokens.add(new Token(TokenType.CLASS, part));
+            else if (part.equals("enum")) tokens.add(new Token(TokenType.ENUM, part));
+            else if (part.equals("import")) tokens.add(new Token(TokenType.IMPORT, part));
+            else if (part.equals("package")) tokens.add(new Token(TokenType.PACKAGE, part));
+            else if (part.matches("public|private|protected|static|this|do"))
+                tokens.add(new Token(TokenType.KEYWORD, part));
+            else if (part.matches("[0-9]+(\\.[0-9]+)?")) tokens.add(new Token(TokenType.NUMBER, part));
+            else if (part.matches("[=+\\-*/<>!&|]+")) tokens.add(new Token(TokenType.OPERATOR, part));
+            else if (part.matches("[a-zA-Z_][a-zA-Z0-9_.]*")) tokens.add(new Token(TokenType.IDENTIFIER, part));
+            else tokens.add(new Token(TokenType.UNKNOWN, part));
+        }
+        tokens.add(new Token(TokenType.EOF, "EOF"));
         return tokens;
     }
-}
 
-// --- 3. Analizador Sintáctico (Parser) ---
-class Parser {
-    private List<Token> tokens;
-    private int posicionActual = 0;
-
-    public Parser(List<Token> tokens) {
-        this.tokens = tokens;
-    }
-
-    public void parse() {
-        parseExpresion();
-        // Si termina sin lanzar excepciones y consumió todos los tokens (o llegó al final de la expresión válida)
-        System.out.println("¡Análisis sintáctico exitoso! La estructura es correcta.");
-    }
-
-    private void parseExpresion() {
-        parseTermino();
-        while (match(TokenType.SUMA) || match(TokenType.RESTA)) {
-            parseTermino();
-        }
-    }
-
-    private void parseTermino() {
-        parseFactor();
-        while (match(TokenType.MULTIPLICACION) || match(TokenType.DIVISION)) {
-            parseFactor();
-        }
-    }
-
-    private void parseFactor() {
-        if (match(TokenType.NUMERO)) {
-            System.out.println("  -> Nodo hoja: Número (" + tokenAnterior().valor + ")");
-        } else if (match(TokenType.IDENTIFICADOR)) {
-            System.out.println("  -> Nodo hoja: Identificador (" + tokenAnterior().valor + ")");
-        } else if (match(TokenType.PARENTESIS_IZQ)) {
-            System.out.println("  -> Entrando a sub-expresión '('");
-            parseExpresion();
-            consume(TokenType.PARENTESIS_DER, "Error Sintáctico: Se esperaba ')'");
-            System.out.println("  -> Saliendo de sub-expresión ')'");
-        } else {
-            throw new RuntimeException("Error Sintáctico: Token inesperado en la posición " + posicionActual);
-        }
-    }
-
-    // --- Métodos Auxiliares del Parser ---
-    private boolean match(TokenType tipoEsperado) {
-        if (posicionActual < tokens.size() && tokens.get(posicionActual).tipo == tipoEsperado) {
-            posicionActual++;
-            return true;
-        }
-        return false;
-    }
-
-    private void consume(TokenType tipoEsperado, String mensajeError) {
-        if (!match(tipoEsperado)) {
-            throw new RuntimeException(mensajeError);
-        }
-    }
-
-    private Token tokenAnterior() {
-        return tokens.get(posicionActual - 1);
-    }
-}
-
-// --- 4. Clase Principal ---
-public class Main {
     public static void main(String[] args) {
-        // Verificar argumentos
-        if (args.length == 0) {
-            System.err.println("Error: No se proporcionó ningún archivo de entrada.");
-            System.out.println("Uso correcto: java Compilador <ruta_del_archivo.txt>");
-            return;
-        }
-
-        String rutaArchivo = args[0];
-        String codigoFuente = "";
-
-        // Leer el archivo
+        if (args.length < 1) return;
         try {
-            codigoFuente = Files.readString(Paths.get(rutaArchivo));
-        } catch (IOException e) {
-            System.err.println("Error al intentar leer el archivo '" + rutaArchivo + "': " + e.getMessage());
-            return;
-        }
-
-        System.out.println("=== INICIANDO COMPILACIÓN ===");
-        System.out.println("Archivo: " + rutaArchivo);
-        System.out.println("Contenido:\n" + codigoFuente.trim());
-        System.out.println("-----------------------------");
-
-        try {
-            // Fase 1: Análisis Léxico
-            AnalizadorLexico lexer = new AnalizadorLexico(codigoFuente);
-            List<Token> tokens = lexer.escanearTokens();
-            System.out.println("[OK] Análisis Léxico completado. Tokens generados: " + tokens.size());
-
-            // Fase 2: Análisis Sintáctico
-            Parser parser = new Parser(tokens);
-            parser.parse();
-
-        } catch (Exception e) {
-            System.err.println("\n[X] FALLO EN LA COMPILACIÓN: " + e.getMessage());
-        }
+            new Main(lexer(args[0])).analizar();
+        } catch (Exception e) { System.err.println(e.getMessage()); }
     }
 }
