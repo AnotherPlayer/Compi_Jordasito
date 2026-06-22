@@ -308,6 +308,7 @@ public class Main {
 
         public CodeGenerator() {
             dataSection = new StringBuilder();
+            dataSection.append("default rel\n"); // MAGIA PARA MAC: Direccionamiento relativo
             dataSection.append("section .data\n");
             dataSection.append("    fmt_int db \"%d\", 10, 0\n");
 
@@ -316,8 +317,8 @@ public class Main {
 
             textSection = new StringBuilder();
             textSection.append("section .text\n");
-            textSection.append("    global main\n");
-            textSection.append("    extern printf\n\n");
+            textSection.append("    global _main\n"); // MAC requiere guion bajo
+            textSection.append("    extern _printf\n\n"); // MAC requiere guion bajo
         }
 
         private String getNewLabel() { return "L" + (++labelCounter); }
@@ -330,11 +331,9 @@ public class Main {
                 case "DECLARATION":
                     handleDeclaration(node);
                     return;
-
                 case "ID_STATEMENT":
                     handleIdStatement(node);
                     return;
-
                 case "STATEMENT":
                     if (!node.children.isEmpty() && node.children.get(0).type.equals("IF")) {
                         handleIf(node);
@@ -356,7 +355,8 @@ public class Main {
             ASTNode tail = node.children.get(2);
 
             if (!tail.children.isEmpty() && tail.children.get(0).type.equals("LPAREN")) {
-                textSection.append(id).append(":\n");
+                String funcName = id.equals("main") ? "_main" : id;
+                textSection.append(funcName).append(":\n");
                 textSection.append("    push rbp\n");
                 textSection.append("    mov rbp, rsp\n\n");
 
@@ -381,7 +381,7 @@ public class Main {
                 if (tail.children.size() > 1 && tail.children.get(0).type.equals("ASSIGN_OP")) {
                     ASTNode expr = tail.children.get(1);
                     evaluateExpression(expr);
-                    textSection.append("    pop eax\n");
+                    textSection.append("    pop rax\n"); // 64 bits
                     textSection.append("    mov dword [").append(id).append("], eax\n\n");
                 }
             }
@@ -394,7 +394,7 @@ public class Main {
             if (tail.children.get(0).type.equals("ASSIGN_OP")) {
                 ASTNode expr = tail.children.get(1);
                 evaluateExpression(expr);
-                textSection.append("    pop eax\n");
+                textSection.append("    pop rax\n"); // 64 bits
                 textSection.append("    mov dword [").append(id).append("], eax\n\n");
 
             } else if (tail.children.get(0).type.equals("LPAREN")) {
@@ -407,19 +407,20 @@ public class Main {
                             String strVal = getStringValue(expr);
                             String strLabel = getNewStringLabel();
                             dataSection.append("    ").append(strLabel).append(" db ").append(strVal).append(", 10, 0\n");
-                            textSection.append("    mov rdi, ").append(strLabel).append("\n");
+                            textSection.append("    lea rdi, [").append(strLabel).append("]\n"); // MAC LEA rel
                             textSection.append("    mov al, 0\n");
-                            textSection.append("    call printf\n\n");
+                            textSection.append("    call _printf\n\n");
                         } else {
                             evaluateExpression(expr);
                             textSection.append("    pop rsi\n");
-                            textSection.append("    mov rdi, fmt_int\n");
+                            textSection.append("    lea rdi, [fmt_int]\n"); // MAC LEA rel
                             textSection.append("    mov al, 0\n");
-                            textSection.append("    call printf\n\n");
+                            textSection.append("    call _printf\n\n");
                         }
                     }
                 } else {
-                    textSection.append("    call ").append(id).append("\n\n");
+                    String funcName = id.equals("main") ? "_main" : id;
+                    textSection.append("    call ").append(funcName).append("\n\n");
                 }
             }
         }
@@ -450,8 +451,8 @@ public class Main {
             ASTNode expr = node.children.get(2);
             evaluateExpression(expr);
 
-            textSection.append("    pop eax\n");
-            textSection.append("    cmp eax, 0\n");
+            textSection.append("    pop rax\n");
+            textSection.append("    cmp rax, 0\n");
             textSection.append("    je ").append(labelElse).append(" ; Salta al ELSE si es falso\n\n");
 
             generate(node.children.get(4));
@@ -475,8 +476,8 @@ public class Main {
             ASTNode expr = node.children.get(2);
             evaluateExpression(expr);
 
-            textSection.append("    pop eax\n");
-            textSection.append("    cmp eax, 0\n");
+            textSection.append("    pop rax\n");
+            textSection.append("    cmp rax, 0\n");
             textSection.append("    je ").append(labelEnd).append(" ; Salir del bucle si es falso\n\n");
 
             generate(node.children.get(4));
@@ -496,9 +497,9 @@ public class Main {
                     ASTNode nextArith = tail.children.get(1);
                     evaluateArithExpr(nextArith);
 
-                    textSection.append("    pop ebx\n");
-                    textSection.append("    pop eax\n");
-                    textSection.append("    cmp eax, ebx\n");
+                    textSection.append("    pop rbx\n"); // 64 bits
+                    textSection.append("    pop rax\n");
+                    textSection.append("    cmp rax, rbx\n");
 
                     String labelTrue = getNewLabel();
                     String labelSkip = getNewLabel();
@@ -535,15 +536,15 @@ public class Main {
                     ASTNode nextTerm = tail.children.get(1);
                     evaluateTerm(nextTerm);
 
-                    textSection.append("    pop ebx\n");
-                    textSection.append("    pop eax\n");
+                    textSection.append("    pop rbx\n");
+                    textSection.append("    pop rax\n");
 
                     if (op.equals("+")) {
-                        textSection.append("    add eax, ebx\n");
-                        textSection.append("    push eax\n");
+                        textSection.append("    add rax, rbx\n");
+                        textSection.append("    push rax\n");
                     } else if (op.equals("-")) {
-                        textSection.append("    sub eax, ebx\n");
-                        textSection.append("    push eax\n");
+                        textSection.append("    sub rax, rbx\n");
+                        textSection.append("    push rax\n");
                     }
 
                     if (tail.children.size() > 2) tail = tail.children.get(2);
@@ -563,17 +564,17 @@ public class Main {
                     ASTNode nextFactor = tail.children.get(1);
                     evaluateFactor(nextFactor);
 
-                    textSection.append("    pop ebx\n");
-                    textSection.append("    pop eax\n");
+                    textSection.append("    pop rbx\n");
+                    textSection.append("    pop rax\n");
 
                     if (op.equals("*")) {
-                        textSection.append("    imul eax, ebx\n");
-                        textSection.append("    push eax\n");
+                        textSection.append("    imul rax, rbx\n");
+                        textSection.append("    push rax\n");
                     } else if (op.equals("/") || op.equals("%")) {
-                        textSection.append("    cdq\n");
-                        textSection.append("    idiv ebx\n");
-                        if (op.equals("/")) textSection.append("    push eax\n");
-                        else textSection.append("    push edx\n");
+                        textSection.append("    cqo\n"); // 64-bit Sign Extend RAX a RDX:RAX
+                        textSection.append("    idiv rbx\n");
+                        if (op.equals("/")) textSection.append("    push rax\n");
+                        else textSection.append("    push rdx\n");
                     }
 
                     if (tail.children.size() > 2) tail = tail.children.get(2);
@@ -588,8 +589,8 @@ public class Main {
             if (child.type.equals("NUMBER")) {
                 textSection.append("    push ").append(child.value).append("\n");
             } else if (child.type.equals("IDENTIFIER")) {
-                textSection.append("    mov eax, dword [").append(child.value).append("]\n");
-                textSection.append("    push eax\n");
+                textSection.append("    movsxd rax, dword [").append(child.value).append("]\n"); // Extiende la variable a 64 bits
+                textSection.append("    push rax\n");
             } else if (child.type.equals("LPAREN")) {
                 evaluateExpression(factor.children.get(1));
             }
