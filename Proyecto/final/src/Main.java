@@ -297,19 +297,40 @@ public class Main {
 
     //generador del codigo ensamblador en NASM
     //nmms ya quiero dormir we, ya son las 3 de la mañanaaaaa
+    // =========================================================================
+    // CLASE GENERADORA DE CÓDIGO (CODE GENERATOR)
+    // =========================================================================
+    // Esta clase recorre el Árbol de Sintaxis Abstracta (AST) e implementa un
+    // enfoque de arquitectura basada en pila para traducir nodos en NASM x86-64.
     static class CodeGenerator {
-        private StringBuilder dataSection;
-        private StringBuilder bssSection;
-        private StringBuilder textSection;
+        
+        // Enumerador para definir de forma limpia el Sistema Operativo objetivo
+        public enum TargetOS { MACOS, LINUX }
+        
+        private TargetOS target;
+        private StringBuilder dataSection; // Almacena constantes y cadenas (.data)
+        private StringBuilder bssSection;  // Almacena variables globales sin inicializar (.bss)
+        private StringBuilder textSection; // Almacena las instrucciones de CPU (.text)
 
-        private int labelCounter = 0;
-        private int stringCounter = 0;
-        private Set<String> variables = new HashSet<>();
+        private int labelCounter = 0;      // Contador para generar etiquetas de saltos (L1, L2, etc.)
+        private int stringCounter = 0;     // Contador para generar etiquetas de cadenas (str1, str2, etc.)
+        private Set<String> variables = new HashSet<>(); // Control de variables declaradas para no duplicar
 
-        public CodeGenerator() {
+        // Constructor: Inicializa los búferes y configura las diferencias de sintaxis entre OS
+        public CodeGenerator(TargetOS target) {
+            this.target = target;
+            
+            // Regla de Oro: macOS exige que los símbolos externos/globales inicien con guion bajo (_).
+            // Linux, por su parte, los utiliza en formato plano (sin prefijo).
+            String mainSymbol = (target == TargetOS.MACOS) ? "_main" : "main";
+            String printfSymbol = (target == TargetOS.MACOS) ? "_printf" : "printf";
+
             dataSection = new StringBuilder();
-            dataSection.append("default rel\n"); // MAGIA PARA MAC: Direccionamiento relativo
+            // 'default rel' activa el direccionamiento relativo a RIP. Es obligatorio en Mac 
+            // y altamente recomendado en Linux moderno para generar binarios PIE (Position Independent Executable).
+            dataSection.append("default rel\n"); 
             dataSection.append("section .data\n");
+            // Define la constante de formato para imprimir enteros con un salto de línea (\n = 10) y fin de cadena (0)
             dataSection.append("    fmt_int db \"%d\", 10, 0\n");
 
             bssSection = new StringBuilder();
@@ -317,24 +338,31 @@ public class Main {
 
             textSection = new StringBuilder();
             textSection.append("section .text\n");
-            textSection.append("    global _main\n"); // MAC requiere guion bajo
-            textSection.append("    extern _printf\n\n"); // MAC requiere guion bajo
+            textSection.append("    global ").append(mainSymbol).append("\n"); // Declara el punto de entrada al enlazador
+            textSection.append("    extern ").append(printfSymbol).append("\n\n"); // Declara que printf viene de una biblioteca externa
         }
 
+        // Generadores de etiquetas únicas para evitar colisiones en los saltos (if/while) y cadenas
         private String getNewLabel() { return "L" + (++labelCounter); }
         private String getNewStringLabel() { return "str" + (++stringCounter); }
 
+        // =========================================================================
+        // FUNCIÓN DESPACHADORA PRINCIPAL (ENRUTADOR DEL AST)
+        // =========================================================================
+        // Realiza un recorrido en profundidad (DFS Pre-order). Analiza el tipo de nodo
+        // y delega el control a funciones especialistas.
         public void generate(ASTNode node) {
             if (node == null) return;
 
             switch (node.type) {
                 case "DECLARATION":
-                    handleDeclaration(node);
+                    handleDeclaration(node); // Modulo especialista en variables y funciones
                     return;
                 case "ID_STATEMENT":
-                    handleIdStatement(node);
+                    handleIdStatement(node);  // Modulo especialista en asignaciones y llamadas a funciones
                     return;
                 case "STATEMENT":
+                    // Si es una sentencia condicional o un bucle, intercepta antes de seguir bajando
                     if (!node.children.isEmpty() && node.children.get(0).type.equals("IF")) {
                         handleIf(node);
                         return;
@@ -345,86 +373,121 @@ public class Main {
                     break;
             }
 
+            // Si el nodo actual no requiere lógica inmediata, procesa recursivamente a todos sus hijos
             for (ASTNode child : node.children) {
                 generate(child);
             }
         }
 
+        // =========================================================================
+        // MANEJADOR DE DECLARACIONES (handleDeclaration)
+        // =========================================================================
+        // Procesa la creación de estructuras mayores: Métodos/Funciones o Variables Globales.
         private void handleDeclaration(ASTNode node) {
-            String id = node.children.get(1).value;
-            ASTNode tail = node.children.get(2);
+            String id = node.children.get(1).value; // Obtiene el nombre del identificador
+            ASTNode tail = node.children.get(2);   // Obtiene la cola de la declaración para saber qué es
 
+            // Si la cola contiene un paréntesis '(', significa que es la definición de una Función/Método
             if (!tail.children.isEmpty() && tail.children.get(0).type.equals("LPAREN")) {
-                String funcName = id.equals("main") ? "_main" : id;
+                String mainSymbol = (target == TargetOS.MACOS) ? "_main" : "main";
+                String funcName = id.equals("main") ? mainSymbol : id;
+                
+                // Escribe la etiqueta de la función en el código
                 textSection.append(funcName).append(":\n");
+                // --- PRÓLOGO DE LA FUNCIÓN ---
+                // Salva el puntero base de la pila del llamador y actualiza el marco de la pila actual
                 textSection.append("    push rbp\n");
                 textSection.append("    mov rbp, rsp\n\n");
 
+                // Si la función tiene cuerpo (un bloque de sentencias), lo genera recursivamente
                 if (tail.children.size() > 3) {
                     ASTNode blockNode = tail.children.get(3);
                     generate(blockNode);
                 }
 
+                // Si salimos de la función principal 'main', inyecta un retorno exitoso (código de salida 0)
                 if (id.equals("main")) {
                     textSection.append("    mov eax, 0\n");
                 }
+                
+                // --- EPÍLOGO DE LA FUNCIÓN ---
+                // Destruye el marco de la pila actual, restaura el RBP anterior y regresa el control
                 textSection.append("    mov rsp, rbp\n");
                 textSection.append("    pop rbp\n");
                 textSection.append("    ret\n\n");
 
             } else {
+                // Si no hay paréntesis, es una Declaración de Variable
                 if (!variables.contains(id)) {
+                    // 'resd 1' reserva un bloque de 4 bytes (Double Word / 32-bits) en la sección .bss
                     bssSection.append("    ").append(id).append(" resd 1\n");
                     variables.add(id);
                 }
 
+                // Si la declaración incluye una asignación directa (ej: int x = 5 + 3;)
                 if (tail.children.size() > 1 && tail.children.get(0).type.equals("ASSIGN_OP")) {
                     ASTNode expr = tail.children.get(1);
-                    evaluateExpression(expr);
-                    textSection.append("    pop rax\n"); // 64 bits
+                    evaluateExpression(expr); // Evalúa el lado derecho matemáticamente. El resultado queda en la pila.
+                    textSection.append("    pop rax\n"); // Extrae el resultado de la pila a RAX
+                    // Guarda los 32 bits de EAX (la parte baja de RAX) en la dirección física de la variable
                     textSection.append("    mov dword [").append(id).append("], eax\n\n");
                 }
             }
         }
 
+        // =========================================================================
+        // MANEJADOR DE IDENTIFICADORES EN ACCIÓN (handleIdStatement)
+        // =========================================================================
+        // Procesa líneas que inician con variables ya existentes: Asignaciones o Llamadas.
         private void handleIdStatement(ASTNode node) {
             String id = node.children.get(0).value;
             ASTNode tail = node.children.get(1);
 
+            // Escenario 1: Asignación simple (ej: x = 10;)
             if (tail.children.get(0).type.equals("ASSIGN_OP")) {
                 ASTNode expr = tail.children.get(1);
-                evaluateExpression(expr);
-                textSection.append("    pop rax\n"); // 64 bits
-                textSection.append("    mov dword [").append(id).append("], eax\n\n");
+                evaluateExpression(expr); // Resuelve la expresión matemática
+                textSection.append("    pop rax\n"); // Recupera el resultado de la pila
+                textSection.append("    mov dword [").append(id).append("], eax\n\n"); // Actualiza la variable en memoria
 
+            // Escenario 2: Llamada a una función (ej: print(...) o System.out.println(...))
             } else if (tail.children.get(0).type.equals("LPAREN")) {
                 if (id.contains("print") || id.contains("System.out")) {
                     ASTNode args = tail.children.get(1);
                     if (!args.children.isEmpty() && args.children.get(0).type.equals("EXPRESSION")) {
                         ASTNode expr = args.children.get(0);
+                        String printfSymbol = (target == TargetOS.MACOS) ? "_printf" : "printf";
 
+                        // Sub-escenario A: Es una impresión de cadena de texto estática (String)
                         if (isStringExpression(expr)) {
                             String strVal = getStringValue(expr);
                             String strLabel = getNewStringLabel();
+                            // Registra el String en la sección .data añadiéndole salto de línea (10) y nulo (0)
                             dataSection.append("    ").append(strLabel).append(" db ").append(strVal).append(", 10, 0\n");
-                            textSection.append("    lea rdi, [").append(strLabel).append("]\n"); // MAC LEA rel
-                            textSection.append("    mov al, 0\n");
-                            textSection.append("    call _printf\n\n");
+                            // LEA (Load Effective Address): Carga la dirección de memoria de la etiqueta en RDI (Primer argumento)
+                            textSection.append("    lea rdi, [").append(strLabel).append("]\n"); 
+                            textSection.append("    mov al, 0\n"); // AL = 0 indica a printf que no estamos pasando flotantes en registros vectoriales (XMM)
+                            textSection.append("    call ").append(printfSymbol).append("\n\n");
+                        
+                        // Sub-escenario B: Es una impresión de una expresión o número entero
                         } else {
-                            evaluateExpression(expr);
-                            textSection.append("    pop rsi\n");
-                            textSection.append("    lea rdi, [fmt_int]\n"); // MAC LEA rel
-                            textSection.append("    mov al, 0\n");
-                            textSection.append("    call _printf\n\n");
+                            evaluateExpression(expr); // Evalúa la expresión numérica
+                            textSection.append("    pop rsi\n"); // Saca el resultado a RSI (Segundo argumento para printf: el valor)
+                            textSection.append("    lea rdi, [fmt_int]\n"); // Carga el formato "%d" en RDI (Primer argumento para printf)
+                            textSection.append("    mov al, 0\n"); // Asegura compatibilidad con funciones variádicas de C
+                            textSection.append("    call ").append(printfSymbol).append("\n\n");
                         }
                     }
                 } else {
-                    String funcName = id.equals("main") ? "_main" : id;
+                    // Si es cualquier otra función definida por el usuario, emite un call directo
+                    String mainSymbol = (target == TargetOS.MACOS) ? "_main" : "main";
+                    String funcName = id.equals("main") ? mainSymbol : id;
                     textSection.append("    call ").append(funcName).append("\n\n");
                 }
             }
         }
 
+        // Métodos auxiliares para buscar si un nodo del AST oculta un token de cadena de texto
         private boolean isStringExpression(ASTNode expr) {
             ASTNode current = expr;
             while (!current.children.isEmpty() && !current.type.equals("STRING")) {
@@ -443,67 +506,85 @@ public class Main {
             return "\"\"";
         }
 
+        // =========================================================================
+        // MANEJADOR DE CONTROL DE FLUJO: CONDICIONAL (handleIf)
+        // =========================================================================
+        // Implementa lógica condicional basándose en banderas de la CPU.
         private void handleIf(ASTNode node) {
-            String labelElse = getNewLabel();
-            String labelEnd = getNewLabel();
+            String labelElse = getNewLabel(); // Etiqueta a donde saltar si la condición es falsa
+            String labelEnd = getNewLabel();  // Etiqueta de salida final del bloque condicional
 
             textSection.append("    ; --- INICIO IF ---\n");
-            ASTNode expr = node.children.get(2);
-            evaluateExpression(expr);
+            ASTNode expr = node.children.get(2); // Obtiene la condición encerrada en los paréntesis
+            evaluateExpression(expr);            // Evalúa el resultado lógico (deja 1 o 0 en la pila)
 
-            textSection.append("    pop rax\n");
-            textSection.append("    cmp rax, 0\n");
+            textSection.append("    pop rax\n");   // Saca el resultado a RAX
+            textSection.append("    cmp rax, 0\n"); // Compara RAX con 0 (Falso)
+            // JE (Jump if Equal): Si RAX es igual a 0, rompe el flujo lineal y salta directo al bloque ELSE
             textSection.append("    je ").append(labelElse).append(" ; Salta al ELSE si es falso\n\n");
 
-            generate(node.children.get(4));
-            textSection.append("    jmp ").append(labelEnd).append("\n");
+            generate(node.children.get(4)); // Si no saltó, significa que es Verdadero. Procesa el bloque interno del IF.
+            textSection.append("    jmp ").append(labelEnd).append("\n"); // Salto incondicional al final para no ejecutar el ELSE
 
+            // Define el punto de entrada para el bloque alternativo
             textSection.append(labelElse).append(":\n");
             ASTNode elseOpt = node.children.get(5);
+            // Si el código fuente original contenía la cláusula 'else', genera su bloque correspondiente
             if (!elseOpt.children.isEmpty() && elseOpt.children.get(0).type.equals("ELSE")) {
                 generate(elseOpt.children.get(1));
             }
+            // Define el punto de salida final
             textSection.append(labelEnd).append(":\n\n");
         }
 
+        // =========================================================================
+        // MANEJADOR DE CONTROL DE FLUJO: BUCLE (handleWhile)
+        // =========================================================================
+        // Estructura ciclos iterativos mediante retornos controlados.
         private void handleWhile(ASTNode node) {
-            String labelStart = getNewLabel();
-            String labelEnd = getNewLabel();
+            String labelStart = getNewLabel(); // Marca de retorno para reevaluar la condición
+            String labelEnd = getNewLabel();   // Marca de escape para romper el bucle
 
             textSection.append("    ; --- INICIO WHILE ---\n");
-            textSection.append(labelStart).append(":\n");
+            textSection.append(labelStart).append(":\n"); // Coloca el punto de reevaluación
 
-            ASTNode expr = node.children.get(2);
-            evaluateExpression(expr);
+            ASTNode expr = node.children.get(2); // Obtiene la condición del ciclo
+            evaluateExpression(expr);            // Calcula el estado actual de la condición
 
             textSection.append("    pop rax\n");
             textSection.append("    cmp rax, 0\n");
+            // Si la condición se vuelve falsa (0), salta inmediatamente fuera del bucle
             textSection.append("    je ").append(labelEnd).append(" ; Salir del bucle si es falso\n\n");
 
-            generate(node.children.get(4));
+            generate(node.children.get(4)); // Procesa recursivamente todas las líneas de código dentro del bucle
 
-            textSection.append("    jmp ").append(labelStart).append("\n");
-            textSection.append(labelEnd).append(":\n\n");
+            textSection.append("    jmp ").append(labelStart).append("\n"); // Bucle infinito hacia arriba para volver a revisar la condición
+            textSection.append(labelEnd).append(":\n\n"); // Destino de escape
         }
 
+        // =========================================================================
+        // NÚCLEO EVALUADOR: EXPRESIONES LÓGICAS / RELACIONALES (==, !=, <, >, <=, >=)
+        // =========================================================================
         private void evaluateExpression(ASTNode expr) {
             ASTNode arith = expr.children.get(0);
-            evaluateArithExpr(arith);
+            evaluateArithExpr(arith); // Resuelve el primer operando aritmético
 
+            // Si existen operadores relacionales adyacentes
             if (expr.children.size() > 1) {
                 ASTNode tail = expr.children.get(1);
                 while (!tail.children.isEmpty() && !tail.children.get(0).type.equals("EPSILON")) {
                     String op = tail.children.get(0).value;
                     ASTNode nextArith = tail.children.get(1);
-                    evaluateArithExpr(nextArith);
+                    evaluateArithExpr(nextArith); // Resuelve el segundo operando aritmético
 
-                    textSection.append("    pop rbx\n"); // 64 bits
-                    textSection.append("    pop rax\n");
-                    textSection.append("    cmp rax, rbx\n");
+                    textSection.append("    pop rbx\n"); // Operando derecho extraído a RBX
+                    textSection.append("    pop rax\n"); // Operando izquierdo extraído a RAX
+                    textSection.append("    cmp rax, rbx\n"); // Resta lógica interna en la CPU para alterar banderas
 
                     String labelTrue = getNewLabel();
                     String labelSkip = getNewLabel();
 
+                    // Mapeo de operadores de alto nivel a instrucciones de salto condicional de la CPU
                     if (op.equals("==")) textSection.append("    je ").append(labelTrue).append("\n");
                     else if (op.equals("!=")) textSection.append("    jne ").append(labelTrue).append("\n");
                     else if (op.equals("<")) textSection.append("    jl ").append(labelTrue).append("\n");
@@ -511,9 +592,11 @@ public class Main {
                     else if (op.equals("<=")) textSection.append("    jle ").append(labelTrue).append("\n");
                     else if (op.equals(">=")) textSection.append("    jge ").append(labelTrue).append("\n");
 
+                    // Camino por defecto (Falso): Guarda un 0 en la pila y salta el bloque verdadero
                     textSection.append("    push 0\n");
                     textSection.append("    jmp ").append(labelSkip).append("\n");
 
+                    // Camino condicional (Verdadero): Guarda un 1 en la pila
                     textSection.append(labelTrue).append(":\n");
                     textSection.append("    push 1\n");
 
@@ -525,9 +608,12 @@ public class Main {
             }
         }
 
+        // =========================================================================
+        // NÚCLEO EVALUADOR: ARITMÉTICA DE SUMA Y RESTA (+, -)
+        // =========================================================================
         private void evaluateArithExpr(ASTNode arith) {
             ASTNode term = arith.children.get(0);
-            evaluateTerm(term);
+            evaluateTerm(term); // Baja al siguiente nivel de precedencia (Multiplicaciones)
 
             if (arith.children.size() > 1) {
                 ASTNode tail = arith.children.get(1);
@@ -536,15 +622,15 @@ public class Main {
                     ASTNode nextTerm = tail.children.get(1);
                     evaluateTerm(nextTerm);
 
-                    textSection.append("    pop rbx\n");
-                    textSection.append("    pop rax\n");
+                    textSection.append("    pop rbx\n"); // Recupera operando derecho
+                    textSection.append("    pop rax\n"); // Recupera operando izquierdo
 
                     if (op.equals("+")) {
-                        textSection.append("    add rax, rbx\n");
-                        textSection.append("    push rax\n");
+                        textSection.append("    add rax, rbx\n"); // Suma el contenido y guarda el resultado en RAX
+                        textSection.append("    push rax\n");     // Vuelve a subir el resultado acumulado a la pila
                     } else if (op.equals("-")) {
-                        textSection.append("    sub rax, rbx\n");
-                        textSection.append("    push rax\n");
+                        textSection.append("    sub rax, rbx\n"); // Resta RAX - RBX y guarda en RAX
+                        textSection.append("    push rax\n");     // Lo sube a la pila
                     }
 
                     if (tail.children.size() > 2) tail = tail.children.get(2);
@@ -553,9 +639,12 @@ public class Main {
             }
         }
 
+        // =========================================================================
+        // NÚCLEO EVALUADOR: ARITMÉTICA DE ALTA PRECEDENCIA (*, /, %)
+        // =========================================================================
         private void evaluateTerm(ASTNode term) {
             ASTNode factor = term.children.get(0);
-            evaluateFactor(factor);
+            evaluateFactor(factor); // Resuelve la unidad básica fundamental (Hojas del AST)
 
             if (term.children.size() > 1) {
                 ASTNode tail = term.children.get(1);
@@ -564,17 +653,20 @@ public class Main {
                     ASTNode nextFactor = tail.children.get(1);
                     evaluateFactor(nextFactor);
 
-                    textSection.append("    pop rbx\n");
-                    textSection.append("    pop rax\n");
+                    textSection.append("    pop rbx\n"); // Operando derecho
+                    textSection.append("    pop rax\n"); // Operando izquierdo
 
                     if (op.equals("*")) {
-                        textSection.append("    imul rax, rbx\n");
+                        textSection.append("    imul rax, rbx\n"); // Multiplicación entera con signo de RAX por RBX -> Resultado en RAX
                         textSection.append("    push rax\n");
                     } else if (op.equals("/") || op.equals("%")) {
-                        textSection.append("    cqo\n"); // 64-bit Sign Extend RAX a RDX:RAX
-                        textSection.append("    idiv rbx\n");
-                        if (op.equals("/")) textSection.append("    push rax\n");
-                        else textSection.append("    push rdx\n");
+                        // Crucial en x86-64: La instrucción IDIV requiere que el dividendo ocupe 128 bits distribuidos en RDX:RAX.
+                        // 'cqo' (Convert Quadword to Octaword) copia el bit de signo de RAX a lo largo de todo RDX de forma segura.
+                        textSection.append("    cqo\n"); 
+                        textSection.append("    idiv rbx\n"); // Divide el registro combinado RDX:RAX entre RBX
+                        
+                        if (op.equals("/")) textSection.append("    push rax\n"); // El cociente exacto se almacena siempre en RAX
+                        else textSection.append("    push rdx\n");                // El residuo matemático (%) se almacena siempre en RDX
                     }
 
                     if (tail.children.size() > 2) tail = tail.children.get(2);
@@ -583,24 +675,39 @@ public class Main {
             }
         }
 
+        // =========================================================================
+        // MÓDULO TERMINAL O PRODUCTOR: FACTORES BÁSICOS (evaluateFactor)
+        // =========================================================================
+        // Es la base de la pila de evaluación. Transforma valores del AST en datos reales dentro de la CPU.
         private void evaluateFactor(ASTNode factor) {
             if (factor.children.isEmpty()) return;
             ASTNode child = factor.children.get(0);
+            
+            // Caso A: Es un número entero directo literal (Constante)
             if (child.type.equals("NUMBER")) {
+                // Inyecta el número de forma nativa a la pila de hardware de la CPU
                 textSection.append("    push ").append(child.value).append("\n");
+                
+            // Caso B: Es una Variable
             } else if (child.type.equals("IDENTIFIER")) {
-                textSection.append("    movsxd rax, dword [").append(child.value).append("]\n"); // Extiende la variable a 64 bits
-                textSection.append("    push rax\n");
+                // 'movsxd': Mueve un entero de 32 bits desde la memoria (RAM) y realiza una extensión de signo completa a 64 bits hacia RAX.
+                // Esto es fundamental para evitar datos basura en operaciones matemáticas combinadas de 64 bits.
+                textSection.append("    movsxd rax, dword [").append(child.value).append("]\n"); 
+                textSection.append("    push rax\n"); // Coloca el valor extendido de la variable en la pila
+                
+            // Caso C: Paréntesis recursivos encajonados (ej: (5 + x) * 2 )
             } else if (child.type.equals("LPAREN")) {
+                // Reinicia la jerarquía de operadores evaluando recursivamente la expresión interna
                 evaluateExpression(factor.children.get(1));
             }
         }
 
+        // Consolida los tres flujos de construcción de texto en un archivo estructurado final de NASM
         public String getFinalAssembly() {
             return dataSection.toString() + "\n" + bssSection.toString() + "\n" + textSection.toString();
         }
     }
-
+    
     //main
     public static void main(String[] args) {
         if (args.length < 1) {
