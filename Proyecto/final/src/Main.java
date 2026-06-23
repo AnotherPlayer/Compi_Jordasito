@@ -43,13 +43,27 @@ public class Main {
 
     //lexer (solo quiero descansar)
     public static List<Token> lexer(String filePath) throws IOException {
+        /*
+        Crea la lista donde irán los tokens
+        Lee todo el archivo una vez
+        Elimina los comentarios
+        */
         List<Token> tokens = new ArrayList<>();
         String content = new String(Files.readAllBytes(Paths.get(filePath)));
         content = content.replaceAll("//.*|/\\*[\\s\\S]*?\\*/", "");
 
+        // Busca que patrones buscar en el txt
         String regex = "\"[^\"]*\"|@[a-zA-Z_][a-zA-Z0-9_]*|[a-zA-Z_][a-zA-Z0-9_.]*|[0-9]+|[=+\\-*/<>!&|]+|[;(),{}]";
+
+        // Va recorriendo el texto y cada que encaje con algun patron y lo captura 
         Matcher m = Pattern.compile(regex).matcher(content);
 
+        // Clasifica cada pieza encontrada
+        // m.find() devuelve true mientras haya coincidencias
+        // m.group() dice cusal fue la coincidencia encontrada
+        // p.StartsWith() es para saber si es un string o una anotacion
+        // p.matches es para saber si es un tipo de dato, operador, palabra reservada, etc
+        // p.equals es para saber si es un simbolo especifico
         while (m.find()) {
             String p = m.group();
             if (p.startsWith("\"")) tokens.add(new Token(TokenType.STRING, p));
@@ -79,6 +93,7 @@ public class Main {
             else if (p.equals("=")) tokens.add(new Token(TokenType.ASSIGN_OP, p));
             else tokens.add(new Token(TokenType.UNKNOWN, p));
         }
+        // Se agrega tkn EOF 
         tokens.add(new Token(TokenType.EOF, "EOF"));
         return tokens;
     }
